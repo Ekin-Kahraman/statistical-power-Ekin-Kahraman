@@ -1,0 +1,428 @@
+---
+title: "Simulation-Based Power Analysis"
+subtitle: "5023B Session 3 Assessment"
+author: "Ekin Kahraman"
+date: today
+format:
+  html:
+    toc: true
+    toc-depth: 3
+    toc-location: left
+    number-sections: true
+    code-fold: show
+    code-tools: true
+    theme: cosmo
+    df-print: paged
+    fig-width: 7
+    fig-height: 4.5
+    embed-resources: true
+execute:
+  warning: false
+  message: false
+  echo: true
+knitr:
+  opts_chunk:
+    comment: "#>"
+    collapse: true
+---
+
+```{r setup}
+#| label: setup
+#| include: false
+
+library(tidyverse)
+library(broom)
+library(ggdag)
+library(dagitty)
+
+set.seed(20260421)
+
+theme_set(theme_minimal(base_size = 11) +
+          theme(plot.title = element_text(face = "bold"),
+                panel.grid.minor = element_blank()))
+```
+
+# Section 2 — Building the Study DAG and Choosing an Effect Size
+
+## Part A — The Study DAG
+
+The study is a randomised feeding trial in great tits: nest boxes are randomly
+assigned to supplementary feeding or control, and juvenile body mass (g) is
+measured at six weeks. Tarsus length (mm) is recorded as a pre-existing
+structural measure of body size. The planned model is
+`lm(body_mass ~ treatment + tarsus_length)`.
+
+```{r dag-greattit}
+#| label: fig-dag-greattit
+#| fig-cap: "DAG for the great tit supplementary feeding study. Treatment is randomised, so no arrows point into it. Tarsus length is a structural trait fixed before treatment; it influences body mass but cannot confound the treatment–body mass relationship."
+
+dag_greattit <- dagify(
+  body_mass ~ treatment + tarsus_length,
+  # Nothing in the study design causes tarsus_length — it is a structural
+  # trait determined by genetics and pre-treatment development, so no arrows
+  # point into it.
+  # Nothing causes treatment — it is randomly assigned to nest boxes,
+  # so no arrows point into it either.
+
+  exposure = "treatment",
+  outcome  = "body_mass",
+
+  labels = c(
+    body_mass     = "Body Mass (g)",
+    treatment     = "Supplementary\nFeeding",
+    tarsus_length = "Tarsus\nLength (mm)"
+  )
+)
+
+ggdag(dag_greattit, text = FALSE, use_labels = "label") +
+  theme_dag() +
+  labs(title = "Great tit supplementary feeding study")
+```
+
+```{r dag-adjustment}
+#| label: dag-adjustment
+ggdag_adjustment_set(dag_greattit)
+```
+
+**Discussion response.**
+Tarsus length cannot confound the treatment–body mass relationship because
+treatment is randomly assigned to nest boxes: randomisation breaks any path
+from tarsus length to treatment, and the DAG correctly contains no arrow
+from tarsus into treatment. `ggdag_adjustment_set()` confirms the empty
+adjustment set — no variable is required to identify the causal effect.
+Tarsus length is included in the model as a **precision covariate**: it
+explains a substantial portion of the variance in body mass, and
+conditioning on it reduces the residual standard deviation of the treatment
+coefficient, which increases power without changing the estimand.
+
+## Part B — Where Does Your Effect Size Come From?
+
+For each option I record a single-sentence judgement on whether I would use
+it, and a single sentence on the specific evidence that would make me
+abandon it.
+
+### Option 1 — Expert Opinion
+
+> `chosen_effect <- 0.75` &nbsp; | &nbsp; `chosen_sigma <- 2.50`
+
+- **Would I use it?** No — a conference remark that cites no primary data
+  and reports no standard deviation gives me no way to defend the chosen
+  value as anything other than a guess, and a guess is not a defensible
+  input to a power analysis.
+- **What would make me abandon it?** I would abandon this option unless the
+  reviewer's claim were backed by the underlying meta-analysis with
+  species-specific effect sizes and pooled residual variances published and
+  re-examinable — without those numbers the range "half a gram to one gram"
+  is not quantitative evidence.
+
+### Option 2 — A Single Published Study
+
+> `chosen_effect <- 1.80` &nbsp; | &nbsp; `chosen_sigma <- NA` (fallback 2.20)
+
+- **Would I use it?** No — n = 12 per group with a reported p-value of
+  0.038 is the textbook winner's-curse / Type M scenario from Gelman &
+  Carlin (2014), so the 1.80 g estimate is almost certainly inflated and
+  powering from it will understate the sample size I actually need.
+- **What would make me abandon it?** I would abandon this option unless the
+  raw data were available to re-estimate the effect and its uncertainty
+  directly, or a pre-registered replication in great tits (not blue tits)
+  reported a comparable magnitude at a larger sample size.
+
+### Option 3 — A Minimum Meaningful Difference
+
+> `chosen_effect <- 0.80` &nbsp; | &nbsp; `chosen_sigma <- 2.10`
+
+- **Would I use it?** Yes — 0.8 g is the smallest effect with a documented
+  demographic consequence (overwinter survival and first-year recruitment)
+  in the same species at a long-term study site, and the residual SD comes
+  from 15 years of tarsus-adjusted Wytham data, so both parameters are
+  grounded in the system I am actually studying.
+- **What would make me abandon it?** I would abandon this option if the
+  Wytham steering committee revised the 0.8 g threshold downward based on
+  updated survival models, or if a survival analysis at my own study site
+  showed the body-mass–recruitment relationship did not hold there.
+
+### Option 4 — A Well-Powered Replication Study
+
+> `chosen_effect <- 1.50` &nbsp; | &nbsp; `chosen_sigma <- 2.20`
+
+- **Would I use it?** Partly — it is the strongest single evidential source
+  (pre-registered, eight sites, n = 400 per treatment, tight CI), but
+  powering at the 1.50 g point estimate assumes my study will reproduce the
+  central estimate rather than the 1.15 g lower CI bound, which I cannot
+  guarantee for a single-site replication.
+- **What would make me abandon it?** I would abandon this option if my
+  study site were materially different from the eight replication sites
+  (e.g. coniferous rather than mixed woodland), or if the lower CI bound
+  (1.15 g) were below the minimum biologically meaningful difference
+  adopted in Option 3.
+
+### Commitment
+
+I commit to **Option 3**. The 0.8 g threshold is species- and site-matched,
+is justified by documented demographic consequences rather than by a single
+underpowered estimate, and powering at the minimum biologically meaningful
+difference is the conservative choice — if the true treatment effect is
+larger than 0.8 g my study will be over-powered (a recoverable outcome),
+whereas powering at a larger effect I cannot guarantee would leave me
+under-powered to detect biologically meaningful differences.
+
+```{r committed-parameters}
+#| label: committed-parameters
+chosen_effect <- 0.80   # g; minimum meaningful difference, Option 3
+chosen_sigma  <- 2.10   # g; residual SD after tarsus adjustment, Wytham 15-yr
+alpha         <- 0.05
+n_sims        <- 1000
+```
+
+# Section 3 — Power Curves and Sensitivity Analysis
+
+All simulations fit `lm(body_mass ~ treatment + tarsus_length)` on data
+generated with a random tarsus covariate. The treatment coefficient is the
+quantity of interest; its p-value is extracted and power is the proportion
+of 1000 simulated experiments in which that p-value falls below 0.05.
+
+```{r simulation-core}
+#| label: simulation-core
+
+# Simulate one experiment and return the p-value for the treatment
+# coefficient from lm(body_mass ~ treatment + tarsus_length).
+simulate_one <- function(n, effect, sigma) {
+  treatment <- rep(c(0, 1), each = n)
+  tarsus    <- rnorm(2 * n, mean = 20, sd = 1)
+  body_mass <- 10 + 0.5 * tarsus + effect * treatment +
+               rnorm(2 * n, mean = 0, sd = sigma)
+  model <- lm(body_mass ~ treatment + tarsus)
+  tidy(model) |>
+    filter(term == "treatment") |>
+    pull(p.value)
+}
+
+# Estimate power at a single (n, effect, sigma) combination.
+estimate_power <- function(n, effect, sigma,
+                           n_sims = 1000, alpha = 0.05) {
+  p_values <- replicate(n_sims, simulate_one(n, effect, sigma))
+  mean(p_values < alpha)
+}
+```
+
+## Exercise 1 — Effect Size Sensitivity
+
+```{r exercise-1}
+#| label: exercise-1
+
+set.seed(20260421)
+
+sample_sizes <- seq(20, 300, by = 20)
+effect_grid  <- c(chosen_effect, chosen_effect * 0.7)
+
+ex1 <- expand_grid(n = sample_sizes, effect = effect_grid) |>
+  mutate(sigma = chosen_sigma,
+         power = pmap_dbl(list(n, effect, sigma), estimate_power,
+                          n_sims = n_sims, alpha = alpha))
+```
+
+```{r fig-ex1}
+#| label: fig-ex1
+#| fig-cap: "Power as a function of sample size per treatment group, at the committed effect size (0.80 g) and at a 30% reduction (0.56 g). The dashed line marks the 0.80 power threshold."
+
+ggplot(ex1, aes(x = n, y = power,
+                colour = factor(effect, labels = c("0.56 g (−30%)",
+                                                   "0.80 g (committed)")),
+                group = effect)) +
+  geom_hline(yintercept = 0.80, linetype = "dashed", colour = "grey40") +
+  geom_line(linewidth = 0.8) +
+  geom_point(size = 2) +
+  scale_y_continuous(limits = c(0, 1), breaks = seq(0, 1, 0.2)) +
+  scale_colour_manual(values = c("0.80 g (committed)" = "#1F78B4",
+                                 "0.56 g (−30%)"     = "#E31A1C")) +
+  labs(x = "Sample size per treatment group",
+       y = "Estimated power",
+       colour = "Effect size",
+       title = "Exercise 1: effect-size sensitivity")
+```
+
+```{r ex1-readoffs}
+#| label: ex1-readoffs
+
+min_n_primary <- ex1 |>
+  filter(effect == chosen_effect, power >= 0.80) |>
+  slice_min(n, n = 1, with_ties = FALSE) |>
+  pull(n)
+
+min_n_reduced <- ex1 |>
+  filter(effect < chosen_effect, power >= 0.80) |>
+  slice_min(n, n = 1, with_ties = FALSE) |>
+  pull(n)
+```
+
+**Written response.** At the committed effect (0.80 g), the curve first
+crosses 0.80 power at **n ≈ `r min_n_primary` birds per treatment group**.
+If the true effect is 30% smaller (0.56 g), the same threshold is not
+reached until **n ≈ `r min_n_reduced` per group** — roughly double the
+committed recommendation. This demonstrates that the recommendation is
+asymmetric in its consequences: over-estimating the effect by 30% leads to
+a materially underpowered study, while under-estimating it by the same
+margin leaves the study over-powered but still correct.
+
+## Exercise 2 — Variance Sensitivity
+
+```{r exercise-2}
+#| label: exercise-2
+
+set.seed(20260421)
+
+sigma_grid <- c(chosen_sigma, chosen_sigma * 1.5)
+
+ex2 <- expand_grid(n = sample_sizes, sigma = sigma_grid) |>
+  mutate(effect = chosen_effect,
+         power  = pmap_dbl(list(n, effect, sigma), estimate_power,
+                           n_sims = n_sims, alpha = alpha))
+```
+
+```{r fig-ex2}
+#| label: fig-ex2
+#| fig-cap: "Power as a function of sample size at the committed residual SD (2.10 g) and at a 50% increase (3.15 g). The committed effect (0.80 g) is held constant."
+
+ggplot(ex2, aes(x = n, y = power,
+                colour = factor(sigma, labels = c("2.10 g (committed)",
+                                                  "3.15 g (+50%)")),
+                group = sigma)) +
+  geom_hline(yintercept = 0.80, linetype = "dashed", colour = "grey40") +
+  geom_line(linewidth = 0.8) +
+  geom_point(size = 2) +
+  scale_y_continuous(limits = c(0, 1), breaks = seq(0, 1, 0.2)) +
+  scale_colour_manual(values = c("2.10 g (committed)" = "#1F78B4",
+                                 "3.15 g (+50%)"      = "#33A02C")) +
+  labs(x = "Sample size per treatment group",
+       y = "Estimated power",
+       colour = "Residual SD",
+       title = "Exercise 2: variance sensitivity")
+```
+
+```{r ex2-readoffs}
+#| label: ex2-readoffs
+
+min_n_sigma_hi <- ex2 |>
+  filter(sigma > chosen_sigma, power >= 0.80) |>
+  slice_min(n, n = 1, with_ties = FALSE) |>
+  pull(n)
+```
+
+**Written response.** Inflating the residual SD from 2.10 g to 3.15 g
+shifts the 0.80-power sample size from **n ≈ `r min_n_primary`** to
+**n ≈ `r min_n_sigma_hi` per group**. The shift is of a similar order of
+magnitude to the effect-size shift in Exercise 1, so the two assumptions
+matter quantitatively as much as each other. However, my residual SD is
+anchored in 15 years of Wytham data and is therefore better evidenced than
+the effect size, which is a policy threshold rather than an empirical
+estimate — meaning the variance axis is less plausible to move than the
+effect-size axis.
+
+## Exercise 3 — Sensitivity Grid
+
+```{r exercise-3}
+#| label: exercise-3
+
+set.seed(20260421)
+
+ex3 <- expand_grid(
+  effect = c(chosen_effect, chosen_effect * 0.7),
+  sigma  = c(chosen_sigma, chosen_sigma * 1.5)
+) |>
+  mutate(n = 30,
+         power = pmap_dbl(list(n, effect, sigma), estimate_power,
+                          n_sims = n_sims, alpha = alpha))
+
+ex3 |>
+  mutate(effect = sprintf("%.2f g", effect),
+         sigma  = sprintf("%.2f g", sigma),
+         power  = sprintf("%.3f",  power)) |>
+  rename(`Effect size` = effect,
+         `Residual SD` = sigma,
+         `n per group` = n,
+         `Estimated power` = power)
+```
+
+**Written response.** At the "convenience" sample size of n = 30 per group,
+power is well below 0.80 in every cell of the grid. Even under the most
+favourable combination (committed effect, committed SD), the study detects
+a biologically meaningful difference less than a third of the time. Under
+the least favourable combination — a 30% smaller effect and a 50% larger
+residual SD — power collapses close to the nominal Type I error rate. A
+study with n = 30 per group is therefore not informative about Option 3's
+minimum meaningful difference: a non-significant result from such a study
+cannot be interpreted as evidence of absence.
+
+# Section 4 — Interpretation and Submission
+
+## Response 1 — What the Curve Recommends
+
+Based on the committed parameters (treatment effect = 0.80 g, residual
+SD = 2.10 g after adjusting for tarsus length, α = 0.05), the power curve
+first reaches 0.80 at **n ≈ `r min_n_primary` juvenile birds per treatment
+group**, i.e. `r 2 * min_n_primary` birds in total. This recommendation
+rests on three assumptions made in Section 2: (i) the effect size is the
+minimum biologically meaningful difference adopted by the Wytham steering
+committee, not the larger point estimates reported in Options 2 and 4;
+(ii) the residual SD is the 15-year site-matched Wytham value, not a
+between-study pooled estimate; and (iii) tarsus length enters the model as
+a precision covariate under randomised treatment assignment, which is
+justified by the DAG in Section 2A.
+
+## Response 2 — How Fragile Is This Estimate?
+
+The single assumption my recommendation is most sensitive to is the
+**effect size**. A 30% reduction (0.80 → 0.56 g) shifts the required
+sample size from **n ≈ `r min_n_primary`** to **n ≈ `r min_n_reduced`** per
+group — close to a doubling. The variance assumption produces a shift of
+comparable magnitude, but the residual SD is anchored in 15 years of
+Wytham data and a reviewer has little reason to move it. The effect size,
+by contrast, is a policy threshold about what counts as biologically
+meaningful; it is less empirical and therefore more contestable. A
+reviewer should treat the sample-size recommendation as reliable
+*conditional on* the 0.8 g threshold being the right criterion — if that
+threshold is revised, the power analysis must be redone.
+
+## Response 3 — An Honest Methods Statement
+
+> Statistical power was estimated by simulation. For each candidate sample
+> size, 1000 datasets were generated under the model
+> `body_mass ~ treatment + tarsus_length` with a treatment effect of
+> 0.80 g and a residual standard deviation of 2.10 g. The 0.80 g effect is
+> the minimum biologically meaningful difference adopted by the Wytham
+> Woods long-term study; the residual SD was estimated from 15 years of
+> tarsus-adjusted body mass at the same site. Power was defined as the
+> proportion of simulations yielding a significant treatment coefficient
+> at α = 0.05. A sample of **`r min_n_primary` birds per treatment group**
+> achieves 0.80 power. The principal limitation is sensitivity to the
+> effect-size assumption: a 30% smaller true effect roughly doubles the
+> required sample.
+
+```{r word-count}
+#| label: word-count
+#| include: false
+methods_text <- "Statistical power was estimated by simulation. For each candidate sample size, 1000 datasets were generated under the model body_mass ~ treatment + tarsus_length with a treatment effect of 0.80 g and a residual standard deviation of 2.10 g. The 0.80 g effect is the minimum biologically meaningful difference adopted by the Wytham Woods long-term study; the residual SD was estimated from 15 years of tarsus-adjusted body mass at the same site. Power was defined as the proportion of simulations yielding a significant treatment coefficient at alpha = 0.05. A sample of N birds per treatment group achieves 0.80 power. The principal limitation is sensitivity to the effect-size assumption: a 30% smaller true effect roughly doubles the required sample."
+n_words <- length(strsplit(methods_text, "\\s+")[[1]])
+```
+
+*Word count: `r n_words` (target 80–120).*
+
+# Submission Checklist
+
+- [x] Author name in YAML header
+- [x] `chosen_effect` set to a numeric value matching the Section 2 commitment (0.80)
+- [x] `chosen_sigma` set to a numeric value matching the Section 2 commitment (2.10)
+- [x] All written response prompts completed
+- [x] Both sensitivity plots render without error
+- [x] Sensitivity grid table contains four rows
+- [x] Final power curve renders without error
+- [x] Document renders to HTML without errors
+- [ ] GitHub Classroom DAG document (Section 1) committed and pushed — *pending classroom repo access*
+
+## Session info
+
+```{r session-info}
+#| label: session-info
+sessionInfo()
+```
