@@ -16,6 +16,8 @@ quarto render session3_assessment.qmd
 
 Or in RStudio: open the .qmd and click **Render**.
 
+GitHub Actions renders the Quarto assessment on every push and pull request.
+
 ## Commitment summary
 
 - Effect size: 0.80 g (Option 3 — minimum meaningful difference at Wytham Woods)
